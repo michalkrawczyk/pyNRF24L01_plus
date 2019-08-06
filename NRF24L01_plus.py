@@ -83,7 +83,7 @@ class NRF24:
     RF_DR_HIGH =            0b00001000
 
     # For binary arythmetic - PA Level
-    RF_PWR_LOW =            0b00000010  #TODO: Change Name
+    RF_PWR_LOW =            0b00000010
     RF_PWR_HIGH =           0b00000100
 
     # Radio Air Data Rate (Bit Rate)
@@ -131,7 +131,7 @@ class NRF24:
     # -----------------------------------------------------------------------
 
     @staticmethod
-    def _convert_to_byte_list(data):     # TODO: also strings?
+    def _convert_to_byte_list(data):     # do also for strings?
         # Converts data to list of bytes
         if isinstance(data, int):
             temp = [data]
@@ -168,7 +168,7 @@ class NRF24:
         self.retries = 3
         self.delay = 0.00025    # Do not change
         self.crc_length = 0
-        self.address_length = 5
+        self.address_width = 5
 
         self.pipe0_reading_address = None
 
@@ -515,7 +515,7 @@ class NRF24:
             raise ValueError("CE Pin is not set")
 
     def wait_for_IRQ(self, timeout=30000):
-        # TODO: Secure from race conditions
+        # Race conditions?
         if self.irq_pin is None:
             raise ValueError("IRQ Pin is not set")
 
@@ -577,10 +577,10 @@ class NRF24:
 
         sent_at = monotonic()
         # Calculate Time on-air
-        packet_time = (8 * (1 + self.address_length + length + self.crc_length) + 9)/(self._data_rate_bits()*1000.)
+        packet_time = (8 * (1 + self.address_width + length + self.crc_length) + 9) / (self._data_rate_bits() * 1000.)
 
         if self.auto_ack != 0:
-            packet_time *= 2    # TODO: Check what can happen if one pipe has no auto ack enabled
+            packet_time *= 2    #Check what can happen if one pipe has no auto ack enabled
 
         if self.retries != 0 and self.auto_ack != 0:
             timeout = sent_at + (packet_time + self.delay) * self.retries
@@ -611,7 +611,7 @@ class NRF24:
         settings |= NRF24.EN_ACK_PAY | NRF24.EN_DYN_ACK     # | EN_DPL?
         self.write_register(NRF24.FEATURE, settings)
         self.ack_payload_available = True
-        # TODO : Check if Features can be disabled
+        #Check if Features can be disabled
 
     def open_writing_pipe(self, address):
         # Note: LSB is written first
@@ -679,7 +679,42 @@ class NRF24:
         self.write_register(NRF24.CONFIG, config)
         self.write_register(NRF24.EN_RXADDR, rx_addr)
 
+    def set_address_width(self, width):
+        possible_width = {
+            3:  NRF24.AW_3,
+            4:  NRF24.AW_4,
+            5:  NRF24.AW_5
+        }
+        settings = possible_width.get(width)
+        if settings is not None:
+            self.write_register(NRF24.SETUP_AW, settings)
+            self.address_width = width
+        else:
+            warnings.warn("Address width could not be set - check arguments", RuntimeWarning)
 
-# TODO: Protection from sending again same settings
-# TODO: Check if registers were written correctly?
-# TODO: Check FIFO Status in R/W functions
+    def get_address_width(self, auto_fix=True):
+        settings = self.read_register(NRF24.SETUP_AW)
+        possible_width = {
+            NRF24.AW_3: 3,
+            NRF24.AW_4: 4,
+            NRF24.AW_5: 5,
+        }
+        width = possible_width.get(settings)
+
+        if width is not None:
+            if self.address_width != width and auto_fix:
+                warnings.warn("Incorrect address width in settings - overwritten to NRF address width", RuntimeWarning)
+                self.address_width = width
+            elif self.address_width != width:
+                warnings.warn("Address width in settings not match width set on NRF" +
+                              "\n Use set_address_width()to avoid problems", RuntimeWarning)
+            return width
+
+        elif settings == NRF24.AW_ERROR:
+            warnings.warn("Illegal value set of address width is set on NRF" +
+                          "\n Use set_address_width() to avoid problems", RuntimeWarning)
+            return 0
+
+        else:
+            raise RuntimeError("Incorrect settings on NRF detected on register: SETUP_AW")
+
