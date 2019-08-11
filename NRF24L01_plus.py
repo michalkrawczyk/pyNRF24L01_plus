@@ -1,7 +1,7 @@
 try:
     import RPi.GPIO as GPIO
     GPIO.setmode(GPIO.BCM)
-    GPIO.setwarnings(False)
+    # GPIO.setwarnings(False)
 except ImportError:
     ImportError("RPi.GPIO module not found")
 
@@ -166,7 +166,7 @@ class NRF24:
         self.payload_size = 5
 
         self.retries = 3
-        self.delay = 0.00025    # Do not change
+        self.delay = 0.00025    # Change it only via set_retries()
         self.crc_length = 0
         self.address_width = 5
 
@@ -180,8 +180,15 @@ class NRF24:
 
         self.last_error = None
 
-        if all(param is not None for param in [spi_bus, spi_device, ce_pin, irq_pin]):  # TODO:  is irq_pin necessery?
+        if all(param is not None for param in [spi_bus, spi_device, ce_pin, irq_pin]):  # IRQ PIN could be unnecessary
             self.begin(spi_bus, spi_device, ce_pin, irq_pin)
+
+    def __del__(self):  # To consider
+        # If object gets deleted or program ends - Reset settings on NRF , end communication and clear GPIO PINS
+        if spidev is not None:
+            self.reset()
+        self.end()
+        GPIO.cleanup()
 
     def spi_init(self, spi_bus, spi_device):
         # Initialize SPI Connection
@@ -190,7 +197,7 @@ class NRF24:
 
         self.spidev.bits_per_word = 8
         self.spidev.max_speed_hz = 500000   # some bugs occur with bigger values (should be 10 MHz as max NRF freq)
-        # TODO:  IOError for max_speed?
+        #IOError for max_speed?
 
         self.spidev.cshigh = False      # Is CS active high = No
         self.spidev.mode = 0            # Clock polarity and clock phase = 0
@@ -202,6 +209,7 @@ class NRF24:
         # Setup Configuration
         self.spi_init(spi_bus, spi_device)
 
+        # Initialize GPIO PINOUT
         self.ce_pin = ce_pin
         self.irq_pin = irq_pin
 
@@ -214,8 +222,8 @@ class NRF24:
         time.sleep(0.001)
         self.reset()    # Reset Configuration
 
-        # Default Settings
-        self.set_retries(5, self.retries)
+        # Default Settings on NRF
+        self.set_retries(5, self.retries)   # time_delay = 5*0.000250 , retries = self.retries
         self.set_PA_level(NRF24.PA_MAX)
         self.set_data_rate(self.data_rate)
         self.set_CRC_length(self.crc_length)
@@ -224,17 +232,19 @@ class NRF24:
 
         self.set_channel(self.channel)
 
-        # Clear read, write and interrupt lines
+        # Clear read, write and interrupt lines - Needed after clearing from reset()?
         self.flush_rx()
         self.flush_tx()
         self.clear_irq_flags()
 
     def end(self):
+        # Ends SPI Communication
         if self.spidev:
             self.spidev.close()
             self.spidev = None
 
     def reset(self):
+        # Reset settings on NRF's registers
         reset_values = {
             0x00:   0b00001000,
             0x01:   0b00111111,
@@ -264,7 +274,6 @@ class NRF24:
 
         self.flush_rx()
         self.flush_tx()
-        # clear_irq_flags()?
 
     def flush_tx(self):
         return self.spidev.xfer2([NRF24.FLUSH_TX])[0]
@@ -306,7 +315,7 @@ class NRF24:
 
     def set_PA_level(self, level):
         settings = self.read_register(NRF24.RF_SETUP)
-        settings &= ~(NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH)
+        settings &= ~(NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH)     # That will set PA bits to '00'
 
         if level == NRF24.PA_MAX:
             settings |= NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH
@@ -322,7 +331,8 @@ class NRF24:
         self.write_register(NRF24.RF_SETUP, settings)
 
     def get_PA_Level(self):
-        power = self.read_register(NRF24.RF_SETUP) & (NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH)
+        power = self.read_register(NRF24.RF_SETUP) & (NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH) # Extract PA bit from STATUS
+
         if power == (NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH):
             return NRF24.PA_MAX
         elif power == NRF24.RF_PWR_HIGH:
@@ -356,7 +366,7 @@ class NRF24:
     def get_data_rate(self):
         settings = self.read_register(NRF24.RF_SETUP) & (NRF24.RF_DR_LOW | NRF24.RF_DR_HIGH)
 
-        if settings == NRF24.RF_DR_LOW:     # TODO : Check for more simple way
+        if settings == NRF24.RF_DR_LOW:
             # [RF_DR_LOW,NRF24.RF_DR_HIGH]
             # '10' = 250 kbps
             return NRF24.BR_250kbps
@@ -390,7 +400,7 @@ class NRF24:
             self.retries = retransmit_count
             self.max_timeout = (self.payload_size / float(self._data_rate_bits()) + self.delay) * self.retries
             self.timeout = self.payload_size / float(self._data_rate_bits()) + self.delay
-            # TODO : Check correctness of timeout calculation
+            #timouts need reconsider
         else:
             raise RuntimeError("Failed to set Retransmit Settings")
 
@@ -452,6 +462,7 @@ class NRF24:
         return self.payload_size
 
     def power_up(self):
+        # When PWR_UP is set - NRF is able to work in RX and TX Modes
         settings = self.read_register(NRF24.CONFIG)
         settings |= NRF24.PWR_UP
         self.write_register(NRF24.CONFIG, settings)
@@ -477,11 +488,14 @@ class NRF24:
 
     def set_auto_ACK(self, enabled):
         if enabled:
-            self.write_register(NRF24.EN_AA, 0b00111111)
+            self.write_register(NRF24.EN_AA, 0b00111111)    # Enable Auto Ack on all pipes
             self.auto_ack = 0b00111111
 
             if self.crc_length == 0:
-                self.set_CRC_length(NRF24.CRC_1)  # Enhanced Shockburst requires at least 1 byte CRC
+                warnings.warn("(AutoAcknowledge) Enhanced Shockburst requires at least 1 byte CRC" +
+                              "\n CRC Length will be set to 1 byte", RuntimeWarning)
+                self.set_CRC_length(NRF24.CRC_1)
+
         else:
             self.write_register(NRF24.EN_AA, 0)
             self.auto_ack = 0
@@ -489,33 +503,37 @@ class NRF24:
     def set_auto_ACK_pipe(self, pipe, enabled):
         if 0 >= pipe or pipe < 6:
             settings = self.read_register(NRF24.EN_AA)
+
             if enabled:
                 if self.crc_length == 0:
                     self.set_CRC_length(NRF24.CRC_1)
                 settings |= 1 << pipe
                 self.auto_ack |= 1 << pipe
+
             else:
                 settings &= ~(1 << pipe)
                 self.auto_ack &= ~(1 << pipe)
 
             self.write_register(NRF24.EN_AA, settings)
+
         else:
             warnings.warn("setAutoAckPipe failed - No such pipe: {}".format(pipe))
 
     def carrier_detect(self):
-        return self.read_register(NRF24.RPD) & 1
+        return self.read_register(NRF24.RPD) & 1    # RPD is latched when a valid packet is received
 
     def set_CE_level(self, level, period=0):
         if self.ce_pin is not None:
             GPIO.output(self.ce_pin, level)
+
             if period > 0:
                 time.sleep(period)
                 GPIO.output(self.ce_pin, 1 - level)
+
         else:
             raise ValueError("CE Pin is not set")
 
     def wait_for_IRQ(self, timeout=30000):
-        # Race conditions?
         if self.irq_pin is None:
             raise ValueError("IRQ Pin is not set")
 
@@ -523,8 +541,9 @@ class NRF24:
             return True
 
         try:
-            return GPIO.wait_for_edge(self.irq_pin, GPIO.FALLING, timeout) == 1
-        except TypeError:  # If wrong Timeout
+            return GPIO.wait_for_edge(self.irq_pin, GPIO.FALLING, timeout=timeout) == 1
+
+        except TypeError:  # Wrong Timeout
             return GPIO.wait_for_edge(self.irq_pin, GPIO.FALLING) == 1
 
     def read_payload(self, buf, buf_len=-1):
@@ -558,7 +577,7 @@ class NRF24:
         if self.dynamic_payloads_enabled:
             if len(buf) > NRF24.max_payload_size:
                 raise RuntimeError("Dynamic Payload size exceed Maximum size of Payload")
-                # RuntimeError?
+                #RuntimeError?
             blank_len = 0
         else:
             if len(buf) > self.payload_size:
@@ -571,37 +590,66 @@ class NRF24:
         return len(tx_buffer) - 1
 
     def write(self, buf):
-        self.last_error = None
         length = self.write_payload(buf)
-        self.set_CE_level(1)
 
-        sent_at = monotonic()
-        # Calculate Time on-air
-        packet_time = (8 * (1 + self.address_width + length + self.crc_length) + 9) / (self._data_rate_bits() * 1000.)
+        time_on_air = (8 * (1 + self.address_width + length + self.crc_length) + 9) / (self._data_rate_bits() * 1000.)
+        # ^ Time on-air = (8 bit * [preamble + address + payload + CRC] + 9 bit) / air_data_rate
+
+        time_upload = (8 * length)/self.spidev.max_speed_hz  # Time Upload = payload_length/spi_data_rate
+
+        # time_stdby2a = 130e-6     # Constant
+
+        if self._data_rate_bits() == 1000:
+            time_irq = 8.2e-6
+        elif self._data_rate_bits() == 2000:
+            time_irq = 6.0e-6
+        else:
+            # 250 kbps - Interpolated
+            time_irq = 9.7e-6
+        # Or Aproximate all time_irq to 10e-6?
+
+        packet_time = time_on_air
 
         if self.auto_ack != 0:
-            packet_time *= 2    #Check what can happen if one pipe has no auto ack enabled
+            # Auto Acknowledge Enabled
+            packet_time *= 2    # += Time on-air ACK - Same Calculation
 
-        if self.retries != 0 and self.auto_ack != 0:
-            timeout = sent_at + (packet_time + self.delay) * self.retries
+        if self.retries != 0 and self.auto_ack != 0:    # Auto Acknowledge Enabled
+            # timeout = Time Enhanced ShockBurst cycle * retries
+            timeout = (time_upload + 2*130e-6 + packet_time + time_irq) * self.retries
+
+            # or timeout = (packet_time + self.delay + 130e-6) * self.retries ?
+
         else:
-            timeout = sent_at + packet_time + self.delay
+            # Auto Acknowledge Disabled
+            # timeout = time_upload + time_stdby2a + time_on_air + time_irq
+            timeout = time_upload + 130e-6 + time_on_air + time_irq
+
+        self.set_CE_level(1)
+        timeout += monotonic()
 
         while monotonic() < timeout:
             time.sleep(packet_time)
             status = self.get_status()
+
             if status & NRF24.TX_DS:
+                # NRF asserts TX_DS IRQ when ACK packet is received - so it can end transmitting
                 self.set_CE_level(0)
                 return True
 
             if status & NRF24.MAX_RT:
+                # If MAX_RT is asserted NRF , further communication is disabled
                 self.last_error = "Write() - MAX_RT"
                 self.set_CE_level(0)
                 break
-        self.set_CE_level(0)
+        self.set_CE_level(0)    # End of transmission
 
         if self.last_error is None:
             self.last_error = "Write() - Timeout"
+
+        # elif self.last_error == "Write() - MAX_RT":
+        #     warnings.warn("MAX_RT is asserted")
+        #clear MAX_RT
 
         self.flush_tx()     # Avoid leaving payload in FIFO TX
         return False
@@ -645,14 +693,11 @@ class NRF24:
         self.write_register(NRF24.EN_RXADDR, settings)
 
     def rx_mode(self):
-        config = self.read_register(NRF24.CONFIG)
-        status = self.read_register(NRF24.STATUS)
+        settings = self.read_register(NRF24.CONFIG)
 
-        config |= NRF24.PWR_UP | NRF24.PRIM_RX
-        status |= NRF24.RX_DR | NRF24.TX_DS | NRF24.MAX_RT
+        settings |= NRF24.PWR_UP | NRF24.PRIM_RX
 
-        self.write_register(NRF24.CONFIG, config)
-        self.write_register(NRF24.STATUS, status)
+        self.write_register(NRF24.CONFIG, settings)
 
         self.flush_tx()
         self.flush_rx()
