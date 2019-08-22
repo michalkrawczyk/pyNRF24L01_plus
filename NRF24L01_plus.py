@@ -107,9 +107,10 @@ class NRF24:
 
     # -----------------------------------------------------------------------
     # FIFO STATUS
-    TX_EMPTY =              0b00010000  # TX FIFO full flag
+    FIFO_TX_FULL =          0b00100000  # TX FIFO full flag
+    TX_EMPTY =              0b00010000  # TX FIFO empty flag
     RX_FULL  =              0b00000010  # RX FIFO full flag
-    RX_EMPTY =              0b00000001  # RX FIFO full flag
+    RX_EMPTY =              0b00000001  # RX FIFO empty flag
     # -----------------------------------------------------------------------
     # FEATURE
     EN_DPL =                0b00000100  # Enable Dynamic Payload Length
@@ -835,9 +836,9 @@ class NRF24:
         ))
 
         print(" TX_FULL: 0b{0:b} \n TX_EMPTY: 0b{1:b} \n RX_FULL: 0b{2:b} \n RX_EMPTY: 0b{3:b} \n".format(
-            (status & 0b00100000) >> 5,
-            (status & NRF24.TX_EMPTY) >> 4,
-            (status & NRF24.RX_FULL) >> 1,
+            (status & NRF24.FIFO_TX_FULL) >> 5,
+            (status & NRF24.TX_EMPTY)     >> 4,
+            (status & NRF24.RX_FULL)      >> 1,
             status & NRF24.RX_EMPTY
         ))
 
