@@ -1,7 +1,7 @@
 try:
     import RPi.GPIO as GPIO
     GPIO.setmode(GPIO.BCM)
-    # GPIO.setwarnings(False)
+    GPIO.setwarnings(False)
 except ImportError:
     ImportError("RPi.GPIO module not found")
 
@@ -18,6 +18,7 @@ import spidev
 class NRF24:
     max_rf_channel =    127
     max_payload_size =  32
+    max_spi_speed =     10000000     # NRF maximum data rate supported - 10 MHz
 
     # -----------------------------------------------------------------------
     # Register Map Table
@@ -99,13 +100,16 @@ class NRF24:
 
     # -----------------------------------------------------------------------
     # STATUS
-    RX_DR =                 0b01000000  # Clear bit for RX_DR
-    TX_DS =                 0b00100000  # Clear bit for TX_DS
-    MAX_RT =                0b00010000  # Clear bit for MAX_RT
+    RX_DR =                 0b01000000
+    TX_DS =                 0b00100000
+    MAX_RT =                0b00010000
+    TX_FULL =               0b00000001
 
     # -----------------------------------------------------------------------
     # FIFO STATUS
-    RX_EMPTY =              0b00000010  # RX FIFO full
+    TX_EMPTY =              0b00010000  # TX FIFO full flag
+    RX_FULL  =              0b00000010  # RX FIFO full flag
+    RX_EMPTY =              0b00000001  # RX FIFO full flag
     # -----------------------------------------------------------------------
     # FEATURE
     EN_DPL =                0b00000100  # Enable Dynamic Payload Length
@@ -184,7 +188,7 @@ class NRF24:
             self.begin(spi_bus, spi_device, ce_pin, irq_pin)
 
     def __del__(self):  # To consider
-        # If object gets deleted or program ends - Reset settings on NRF , end communication and clear GPIO PINS
+        # At end of life - Reset settings on NRF , end communication and clear GPIO PINS
         if spidev is not None:
             self.reset()
         self.end()
@@ -246,28 +250,28 @@ class NRF24:
     def reset(self):
         # Reset settings on NRF's registers
         reset_values = {
-            0x00:   0b00001000,
-            0x01:   0b00111111,
-            0x02:   0b00000011,
-            0x03:   0b00000011,
-            0x04:   0b00000011,
-            0x05:   0b00000010,
-            0x06:   0b00001110,
-            0x0A:   [0xE7, 0xE7, 0xE7, 0xE7, 0xE7],
-            0x0B:   [0xC2, 0xC2, 0xC2, 0xC2, 0xC2],
-            0x0C:   0xC3,
-            0x0D:   0xC4,
-            0x0E:   0xC5,
-            0x0F:   0xC6,
-            0x10:   [0xE7, 0xE7, 0xE7, 0xE7, 0xE7],
-            0x11:   0,
-            0x12:   0,
-            0x13:   0,
-            0x14:   0,
-            0x15:   0,
-            0x16:   0,
-            0x1C:   0,
-            0x1D:   0
+            NRF24.CONFIG:       0b00001000,
+            NRF24.EN_AA:        0b00111111,
+            NRF24.EN_RXADDR:    0b00000011,
+            NRF24.SETUP_AW:     0b00000011,
+            NRF24.SETUP_RETR:   0b00000011,
+            NRF24.RF_CH:        0b00000010,
+            NRF24.RF_SETUP:     0b00001110,
+            NRF24.RX_ADDR_P0:   [0xE7, 0xE7, 0xE7, 0xE7, 0xE7],
+            NRF24.RX_ADDR_P1:   [0xC2, 0xC2, 0xC2, 0xC2, 0xC2],
+            NRF24.RX_ADDR_P2:   0xC3,
+            NRF24.RX_ADDR_P3:   0xC4,
+            NRF24.RX_ADDR_P4:   0xC5,
+            NRF24.RX_ADDR_P5:   0xC6,
+            NRF24.TX_ADDR:      [0xE7, 0xE7, 0xE7, 0xE7, 0xE7],
+            NRF24.RX_PW_P0:     0,
+            NRF24.RX_PW_P1:     0,
+            NRF24.RX_PW_P2:     0,
+            NRF24.RX_PW_P3:     0,
+            NRF24.RX_PW_P4:     0,
+            NRF24.RX_PW_P5:     0,
+            NRF24.DYNPD:        0,
+            NRF24.FEATURE:      0
         }
         for register, value in reset_values.items():
             self.write_register(register, value)
@@ -567,7 +571,7 @@ class NRF24:
 
     def read(self, buf, buf_len=-1):
         self.read_payload(buf, buf_len)
-        return self.read_register(NRF24.FIFO_STATUS & NRF24.RX_EMPTY)
+        return self.read_register(NRF24.FIFO_STATUS & NRF24.RX_EMPTY)   # Need change
 
     def get_status(self):
         return self.spidev.xfer2([NRF24.NOP])[0]
@@ -762,4 +766,134 @@ class NRF24:
 
         else:
             raise RuntimeError("Incorrect settings on NRF detected on register: SETUP_AW")
+
+    def print_register_byte(self, register_address):
+        register = {
+            NRF24.EN_AA:        "EN_AA",
+            NRF24.EN_RXADDR:    "EN_RXADDR",
+            NRF24.SETUP_AW:     "SETUP_AW",
+            NRF24.SETUP_RETR:   "SETUP_RETR",
+            NRF24.RF_CH:        "RF_CH",
+            NRF24.RF_SETUP:     "RF_SETUP",
+            NRF24.RPD:          "RPD",
+            NRF24.DYNPD:        "DYNPD",
+            NRF24.FEATURE:      "FEATURE"
+        }
+
+        name = register.get(register_address)
+
+        if name is not None:
+            print("0x{0:02x} - {1}: 0b{2:08b}".format(
+                register_address,
+                name,
+                self.read_register(register_address)
+            ))
+        else:
+            print("No such register address - 0x{:02x}".format(
+                register_address
+            ))
+
+    def print_status(self):
+        status = self.read_register(NRF24.STATUS)
+        print("STATUS: 0b{:08b}".format(
+            status
+        ))
+
+        rx_p_no_status = (status & 0b00001110) >> 1
+
+        print(" RX_DR: {0:b},\n TX_DS: {1:b},\n MAX_RT: {2:b},\n RX_P_NO: 0b{3:b},\n TX_FULL: {4:b}".format(
+            (status & NRF24.RX_DR)  >> 6,
+            (status & NRF24.TX_DS)  >> 5,
+            (status & NRF24.MAX_RT) >> 4,
+            rx_p_no_status,
+            status & NRF24.TX_FULL
+        ))
+
+        if rx_p_no_status == 0b111:
+            print("Data pipe for the payload available for reading from RX_FIFO -> RX FIFO Empty")
+        elif rx_p_no_status == 0b110:
+            print("Data pipe for the payload available for reading from RX_FIFO -> Not Used")
+
+    def print_observe_TX(self):
+        status = self.read_register(NRF24.OBSERVE_TX)
+        print("OBSERVE_TX: 0b{:08b}".format(
+            status
+        ))
+
+        print("PLOS_CNT(Lost Packet Counter): {0} \nARC_CNT(Retransmitted packet counter): {1} ".format(
+                status >> 4,
+                status & 0b1111
+        ))
+
+        if (status >> 4) == 15:
+            print("PLOS_CNT reached maximum value and needs reset")
+
+    def print_fifo_status(self):
+        status = self.read_register(NRF24.FIFO_STATUS)
+        print("FIFO_STATUS: 0b{:08b}".format(
+            status
+        ))
+
+        print(" TX_FULL: 0b{0:b} \n TX_EMPTY: 0b{1:b} \n RX_FULL: 0b{2:b} \n RX_EMPTY: 0b{3:b} \n".format(
+            (status & 0b00100000) >> 5,
+            (status & NRF24.TX_EMPTY) >> 4,
+            (status & NRF24.RX_FULL) >> 1,
+            status & NRF24.RX_EMPTY
+        ))
+
+    def print_address_register(self, register_address):
+        register = {
+            NRF24.RX_ADDR_P0:   "RX_ADDR_P0",
+            NRF24.RX_ADDR_P1:   "RX_ADDR_P1",
+            NRF24.RX_ADDR_P2:   "RX_ADDR_P2",
+            NRF24.RX_ADDR_P3:   "RX_ADDR_P3",
+            NRF24.RX_ADDR_P4:   "RX_ADDR_P4",
+            NRF24.RX_ADDR_P5:   "RX_ADDR_P5",
+            NRF24.TX_ADDR:      "TX_ADDR",
+        }
+
+        name = register.get(register_address)
+
+        if name is not None:
+            print("0x{0:02x} - {1}: 0b{2:>02x}".format(
+                register_address,
+                name,
+                self.read_register(register_address)
+            ))
+        else:
+            print("No such register address - 0x{:02x}".format(
+                register_address
+            ))
+
+    def print_details(self):
+        print("Current Settings:")
+
+        print(" Data Rate: {} kbps".format(self._data_rate_bits()))
+        print(" CRC Length: {} bytes".format(self.crc_length))
+
+        pa_dbm = ["-18 dBm", "-12 dBm" , "-6 dBm", "0 dBm"]
+        print(" PA Power: {}".format(
+            pa_dbm[self.get_PA_Level()]
+        ))
+
+        print("Values on Registers:")
+        self.print_register_byte(NRF24.EN_AA)
+        self.print_register_byte(NRF24.EN_RXADDR)
+        self.print_register_byte(NRF24.SETUP_AW)
+        self.print_register_byte(NRF24.SETUP_RETR)
+        self.print_register_byte(NRF24.RF_CH)
+        self.print_register_byte(NRF24.RF_SETUP)
+        self.print_status()
+        self.print_observe_TX()
+        self.print_register_byte(NRF24.RPD)
+        self.print_register_byte(NRF24.DYNPD)
+        self.print_register_byte(NRF24.FEATURE)
+
+        print("\nAddresses:")
+        for i in range(6):
+            self.print_address_register(NRF24.RX_ADDR_P0+i)
+
+        self.print_address_register(NRF24.TX_ADDR)
+
+        print("\n Last Error: {}\n".format(self.last_error))
 
