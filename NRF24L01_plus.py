@@ -3,7 +3,12 @@ try:
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
 except ImportError:
-    ImportError("RPi.GPIO module not found")
+    raise ImportError("RPi.GPIO module not found")
+
+try:
+    import spidev
+except ImportError:
+    raise ImportError("spidev module not found - Check if installed")
 
 try:
     from time import monotonic
@@ -12,13 +17,12 @@ except ImportError:
 
 import time
 import warnings
-import spidev
+
 
 
 class NRF24:
     max_rf_channel =    127
     max_payload_size =  32
-    max_spi_speed =     10000000     # NRF maximum data rate supported - 10 MHz
 
     # -----------------------------------------------------------------------
     # Register Map Table
@@ -136,16 +140,21 @@ class NRF24:
     # -----------------------------------------------------------------------
 
     @staticmethod
-    def _convert_to_byte_list(data):     # do also for strings?
+    def _convert_to_byte_list(data):
         # Converts data to list of bytes
         if isinstance(data, int):
-            temp = [data]
+            data = [data]
+        elif isinstance(data, str):
+            data = [ord(var) for var in data]
+        elif isinstance(data, float):
+            data = [int(x) for x in divmod(data*100, 100)]
+            warnings.warn("Float will be converted be converted into 2 int numbers with precision of 0.01")
         else:
-            temp = [int(var) for var in data]
-        for byte in temp:
+            data = [int(var) for var in data]
+        for byte in data:
             if 0 > byte > 255:
                 raise ValueError("Cannot convert value: {}".format(byte))
-        return temp
+        return data
 
     def _data_rate_bits(self):
         # Interpretation of Data Rate bits in kbps
@@ -188,7 +197,7 @@ class NRF24:
         if all(param is not None for param in [spi_bus, spi_device, ce_pin, irq_pin]):  # IRQ PIN could be unnecessary
             self.begin(spi_bus, spi_device, ce_pin, irq_pin)
 
-    def __del__(self):  # To consider
+    def __del__(self):
         # At end of life - Reset settings on NRF , end communication and clear GPIO PINS
         if spidev is not None:
             self.reset()
@@ -201,8 +210,7 @@ class NRF24:
         self.spidev.open(spi_bus, spi_device)
 
         self.spidev.bits_per_word = 8
-        self.spidev.max_speed_hz = 500000   # some bugs occur with bigger values (should be 10 MHz as max NRF freq)
-        #IOError for max_speed?
+        self.spidev.max_speed_hz = 10000000     # Max supported by NRF24L01+ -> 10 MHz
 
         self.spidev.cshigh = False      # Is CS active high = No
         self.spidev.mode = 0            # Clock polarity and clock phase = 0
