@@ -578,7 +578,7 @@ class NRF24:
 
     def read(self, buf, buf_len=-1):
         self.read_payload(buf, buf_len)
-        return self.read_register(NRF24.FIFO_STATUS & NRF24.RX_EMPTY)   # Need change
+        return self.read_register(NRF24.FIFO_STATUS) & NRF24.RX_EMPTY   # Return True if there's nothing left to read
 
     def get_status(self):
         return self.spidev.xfer2([NRF24.NOP])[0]
