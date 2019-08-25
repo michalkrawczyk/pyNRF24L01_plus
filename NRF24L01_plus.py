@@ -151,9 +151,7 @@ class NRF24:
             warnings.warn("Float will be converted be converted into 2 int numbers with precision of 0.01")
         else:
             data = [int(var) for var in data]
-        for byte in data:
-            if 0 > byte > 255:
-                raise ValueError("Cannot convert value: {}".format(byte))
+
         return data
 
     def _data_rate_bits(self):
