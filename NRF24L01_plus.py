@@ -94,7 +94,7 @@ class NRF24:
     # Radio Air Data Rate (Bit Rate)
     BR_1Mbps =   0b00
     BR_2Mbps =   0b01
-    BR_250kbps = 0b11
+    BR_250kbps = 0b10
 
     # Power Amplifier - RF output power , DC current Consumption
     PA_MAX =    0b11   # 0dBm , 11.3 mA
@@ -157,9 +157,9 @@ class NRF24:
     def _data_rate_bits(self):
         # Interpretation of Data Rate bits in kbps
         bits = {
-            0b00: 1000,
-            0b01: 2000,
-            0b11: 250,
+            NRF24.BR_1Mbps:     1000,
+            NRF24.BR_2Mbps:     2000,
+            NRF24.BR_250kbps:   250,
         }
         rate_bits = bits.get(self.data_rate)
         if rate_bits is None:
@@ -326,7 +326,7 @@ class NRF24:
 
     def set_PA_level(self, level):
         settings = self.read_register(NRF24.RF_SETUP)
-        settings &= ~(NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH)     # That will set PA bits to '00'
+        settings &= ~(NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH)
 
         if level == NRF24.PA_MAX:
             settings |= NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH
@@ -342,7 +342,7 @@ class NRF24:
         self.write_register(NRF24.RF_SETUP, settings)
 
     def get_PA_Level(self):
-        power = self.read_register(NRF24.RF_SETUP) & (NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH) # Extract PA bit from STATUS
+        power = self.read_register(NRF24.RF_SETUP) & (NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH)
 
         if power == (NRF24.RF_PWR_LOW | NRF24.RF_PWR_HIGH):
             return NRF24.PA_MAX
@@ -374,25 +374,27 @@ class NRF24:
 
         self.write_register(NRF24.RF_SETUP, settings)
 
-    def get_data_rate(self):
+    def get_data_rate(self, auto_fix=True):
         settings = self.read_register(NRF24.RF_SETUP) & (NRF24.RF_DR_LOW | NRF24.RF_DR_HIGH)
 
         if settings == NRF24.RF_DR_LOW:
             # [RF_DR_LOW,NRF24.RF_DR_HIGH]
             # '10' = 250 kbps
             return NRF24.BR_250kbps
-
         elif settings == 0x00:
             # '00' = 1 Mbps
             return NRF24.BR_1Mbps
-
         elif settings == NRF24.RF_DR_HIGH:
             # '01' = 2 Mbps
             return NRF24.BR_2Mbps
-
         else:
             # f.e '11' = Reserved
-            raise RuntimeError("Wrong Data Rate:{}".format(bin(settings)))  # Warning/Handling?
+            if auto_fix:
+                warnings.warn("Incorrect Data Rate on NRF - Will be set to 1 Mbps to avoid invalid functioning",
+                              RuntimeWarning)
+                self.set_data_rate(NRF24.BR_1Mbps)
+            else:
+                raise RuntimeError("Wrong Data Rate:{}".format(bin(settings)))
 
     def set_retries(self, retransmit_delay, retransmit_count):
         # retransmit_delay == ARD
@@ -617,7 +619,7 @@ class NRF24:
         else:
             # 250 kbps - Interpolated
             time_irq = 9.7e-6
-        # Or Aproximate all time_irq to 10e-6?
+        # Or Aproximate all time_irq?
 
         packet_time = time_on_air
 
@@ -667,7 +669,7 @@ class NRF24:
 
     def enable_ACK_payload(self):
         settings = self.read_register(NRF24.FEATURE)
-        settings |= NRF24.EN_ACK_PAY | NRF24.EN_DYN_ACK     # | EN_DPL?
+        settings |= NRF24.EN_ACK_PAY | NRF24.EN_DYN_ACK | NRF24.EN_DPL
         self.write_register(NRF24.FEATURE, settings)
         self.ack_payload_available = True
         #Check if Features can be disabled
@@ -758,18 +760,18 @@ class NRF24:
         width = possible_width.get(settings)
 
         if width is not None:
-            if self.address_width != width and auto_fix:
+            if self.address_width != width:
                 warnings.warn("Incorrect address width in settings - overwritten to NRF address width", RuntimeWarning)
                 self.address_width = width
-            elif self.address_width != width:
-                warnings.warn("Address width in settings not match width set on NRF" +
-                              "\n Use set_address_width()to avoid problems", RuntimeWarning)
             return width
 
         elif settings == NRF24.AW_ERROR:
-            warnings.warn("Illegal value set of address width is set on NRF" +
-                          "\n Use set_address_width() to avoid problems", RuntimeWarning)
-            return 0
+            if auto_fix:
+                warnings.warn("Illegal value set on address width is set on NRF" +
+                              "\n Width will be set to default value(5)", RuntimeWarning)
+                self.set_address_width(5)
+            else:
+                raise RuntimeError("Illegal Value of address width detected on NRF")
 
         else:
             raise RuntimeError("Incorrect settings on NRF detected on register: SETUP_AW")
