@@ -295,6 +295,9 @@ class NRF24:
     def clear_irq_flags(self):
         self.write_register(NRF24.STATUS, NRF24.RX_DR | NRF24.TX_DS | NRF24.MAX_RT)
 
+    def clear_tx_flags(self):
+        self.write_register(NRF24.STATUS, NRF24.TX_DS | NRF24.MAX_RT)
+
     def write_register(self, register, value):
         buf = [NRF24.W_REGISTER | (NRF24.REGISTER_MASK & register)]
         buf += self._convert_to_byte_list(value)
@@ -411,17 +414,9 @@ class NRF24:
         if self.read_register(NRF24.SETUP_RETR) == settings:
             self.delay = retransmit_delay * 0.00025
             self.retries = retransmit_count
-            self.max_timeout = (self.payload_size / float(self._data_rate_bits()) + self.delay) * self.retries
-            self.timeout = self.payload_size / float(self._data_rate_bits()) + self.delay
             #timouts need reconsider
         else:
             raise RuntimeError("Failed to set Retransmit Settings")
-
-    def get_max_timeout(self):
-        return self.max_timeout
-
-    def get_timeout(self):
-        return self.timeout
 
     def set_CRC_length(self, length):
         settings = self.read_register(NRF24.CONFIG)
@@ -602,7 +597,7 @@ class NRF24:
 
         return len(tx_buffer) - 1
 
-    def write(self, buf):
+    def write(self, buf, max_rt_handler=True):
         length = self.write_payload(buf)
 
         time_on_air = (8 * (1 + self.address_width + length + self.crc_length) + 9) / (self._data_rate_bits() * 1000.)
@@ -652,17 +647,19 @@ class NRF24:
 
             if status & NRF24.MAX_RT:
                 # If MAX_RT is asserted NRF , further communication is disabled
+                warnings.warn("Reached MAX_RT - Further Communication is disabled", RuntimeWarning)
                 self.last_error = "Write() - MAX_RT"
-                self.set_CE_level(0)
                 break
+
         self.set_CE_level(0)    # End of transmission
 
         if self.last_error is None:
+            warnings.warn("Reached Timeout in Write", RuntimeWarning)
             self.last_error = "Write() - Timeout"
 
-        # elif self.last_error == "Write() - MAX_RT":
-        #     warnings.warn("MAX_RT is asserted")
-        #clear MAX_RT
+        elif self.last_error == "Write() - MAX_RT" and max_rt_handler:
+            print("Clearing MAX_RT and TX_DS")
+            self.clear_tx_flags()
 
         self.flush_tx()     # Avoid leaving payload in FIFO TX
         return False
