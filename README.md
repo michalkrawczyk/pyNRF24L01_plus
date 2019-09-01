@@ -1,3 +1,4 @@
-Test Library for NRF24L01+ on Raspberry Pi 3 B+ for Home Project
+Library for NRF24L01+ written for Raspberry Pi 3 B+
 
-Explanation of functions -> Wiki
+Communication Interface: SPI
+
