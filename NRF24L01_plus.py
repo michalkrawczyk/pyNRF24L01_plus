@@ -162,6 +162,7 @@ class NRF24:
             NRF24.BR_250kbps:   250,
         }
         rate_bits = bits.get(self.data_rate)
+
         if rate_bits is None:
             raise ValueError("Such Data Rate does not exist ")
         else:
@@ -243,9 +244,6 @@ class NRF24:
 
         self.set_channel(self.channel)
 
-        # Clear read, write and interrupt lines - Needed after clearing from reset()?
-        self.flush_rx()
-        self.flush_tx()
         self.clear_irq_flags()
 
     def end(self):
@@ -317,14 +315,17 @@ class NRF24:
     def set_channel(self, channel):
         if channel < 0 or channel > self.max_rf_channel:
             raise ValueError("Channel number out of range. Min:0 ,Max:{}".format(self.max_rf_channel))
+
         self.write_register(NRF24.RF_CH, channel)
         self.channel = channel
 
     def get_channel(self):
         channel = self.read_register(NRF24.RF_CH)
+
         if channel != self.channel:
             warnings.warn("Incorrect channel in settings - overwritten to NRF channel")
             self.channel = channel
+
         return channel
 
     def set_PA_level(self, level):
@@ -366,7 +367,7 @@ class NRF24:
 
         elif rate == NRF24.BR_1Mbps:
             self.data_rate = NRF24.BR_1Mbps
-            # bits for 1 Mbps are 00 - settings already have it
+            # bits for 1 Mbps are 00 - settings already have that
 
         elif rate == NRF24.BR_2Mbps:
             self.data_rate = NRF24.BR_2Mbps
@@ -414,7 +415,6 @@ class NRF24:
         if self.read_register(NRF24.SETUP_RETR) == settings:
             self.delay = retransmit_delay * 0.00025
             self.retries = retransmit_count
-            #timouts need reconsider
         else:
             raise RuntimeError("Failed to set Retransmit Settings")
 
@@ -458,12 +458,14 @@ class NRF24:
         self.write_register(NRF24.CONFIG, settings)
         # Delay?
         if settings != self.read_register(NRF24.CONFIG):
-            raise RuntimeError("Failed to disable CRC")     # warning?
+            raise RuntimeError("Failed to disable CRC")
+
         self.crc_length = 0
 
     def set_payload_size(self, size):
         if size > NRF24.max_payload_size:
             warnings.warn("Payload size exceed maximum size - Payload will be set to maximum size")
+
         self.payload_size = min(max(size, 1), NRF24.max_payload_size)
 
     def get_payload_size(self):
@@ -473,7 +475,9 @@ class NRF24:
         # When PWR_UP is set - NRF is able to work in RX and TX Modes
         settings = self.read_register(NRF24.CONFIG)
         settings |= NRF24.PWR_UP
+
         self.write_register(NRF24.CONFIG, settings)
+
         time.sleep(self.delay)
 
     def power_down(self):
@@ -515,6 +519,7 @@ class NRF24:
             if enabled:
                 if self.crc_length == 0:
                     self.set_CRC_length(NRF24.CRC_1)
+
                 settings |= 1 << pipe
                 self.auto_ack |= 1 << pipe
 
@@ -523,7 +528,6 @@ class NRF24:
                 self.auto_ack &= ~(1 << pipe)
 
             self.write_register(NRF24.EN_AA, settings)
-
         else:
             warnings.warn("setAutoAckPipe failed - No such pipe: {}".format(pipe))
 
@@ -567,6 +571,7 @@ class NRF24:
 
         tx_buffer = [NRF24.R_RX_PAYLOAD] + [NRF24.NOP] * (blank_len + data_len + 1)
         payload = self.spidev.xfer2(tx_buffer)
+
         del buf[:]
         buf += payload[1:data_len + 1]
 
@@ -582,10 +587,10 @@ class NRF24:
 
     def write_payload(self, buf):
         buf = self._convert_to_byte_list(buf)
+
         if self.dynamic_payloads_enabled:
             if len(buf) > NRF24.max_payload_size:
                 raise RuntimeError("Dynamic Payload size exceed Maximum size of Payload")
-                #RuntimeError?
             blank_len = 0
         else:
             if len(buf) > self.payload_size:
@@ -667,6 +672,7 @@ class NRF24:
     def enable_ACK_payload(self):
         settings = self.read_register(NRF24.FEATURE)
         settings |= NRF24.EN_ACK_PAY | NRF24.EN_DYN_ACK | NRF24.EN_DPL
+
         self.write_register(NRF24.FEATURE, settings)
         self.ack_payload_available = True
         #Check if Features can be disabled
@@ -741,6 +747,7 @@ class NRF24:
             5:  NRF24.AW_5
         }
         settings = possible_width.get(width)
+
         if settings is not None:
             self.write_register(NRF24.SETUP_AW, settings)
             self.address_width = width
@@ -761,7 +768,6 @@ class NRF24:
                 warnings.warn("Incorrect address width in settings - overwritten to NRF address width", RuntimeWarning)
                 self.address_width = width
             return width
-
         elif settings == NRF24.AW_ERROR:
             if auto_fix:
                 warnings.warn("Illegal value set on address width is set on NRF" +
@@ -769,7 +775,6 @@ class NRF24:
                 self.set_address_width(5)
             else:
                 raise RuntimeError("Illegal Value of address width detected on NRF")
-
         else:
             raise RuntimeError("Incorrect settings on NRF detected on register: SETUP_AW")
 
@@ -874,10 +879,12 @@ class NRF24:
     def print_details(self):
         print("Current Settings:")
 
+        print(" RF Channel Frequency: {} MHz".format(2400 + self.get_channel()))
         print(" Data Rate: {} kbps".format(self._data_rate_bits()))
+        print(" Payload Size: {} bytes".format(self.get_payload_size()))
         print(" CRC Length: {} bytes".format(self.crc_length))
 
-        pa_dbm = ["-18 dBm", "-12 dBm" , "-6 dBm", "0 dBm"]
+        pa_dbm = ["-18 dBm", "-12 dBm", "-6 dBm", "0 dBm"]
         print(" PA Power: {}".format(
             pa_dbm[self.get_PA_Level()]
         ))
@@ -894,6 +901,8 @@ class NRF24:
         self.print_register_byte(NRF24.RPD)
         self.print_register_byte(NRF24.DYNPD)
         self.print_register_byte(NRF24.FEATURE)
+
+        print("Address length: {} bytes".format(self.get_address_width()))
 
         print("\nAddresses:")
         for i in range(6):
